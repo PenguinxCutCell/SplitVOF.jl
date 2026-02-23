@@ -59,3 +59,9 @@ println("volume = ", volume(vg))
 
 - v0.1 is a robust baseline implementation intended for verification before higher-order or unsplit variants.
 - Boundary conditions are currently periodic in all directions.
+
+## Examples
+
+- `examples/zalesak.jl`: slotted-disk rotation benchmark.
+- `examples/sphere_translation_3d.jl`: 3D translation mass-conservation check.
+- `examples/vortex_circle_cairomakie.jl`: reversible vortex-circle deformation with CairoMakie plots and shape diagnostics.

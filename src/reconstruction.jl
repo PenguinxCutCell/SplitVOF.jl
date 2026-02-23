@@ -1,10 +1,43 @@
+"""
+Return `true` if cell is empty (`α <= tol`).
+"""
 @inline is_empty(vg::SplitVOFGrid, i::Int, j::Int) = vg.fract[i, j] <= vg.tol
+
+"""
+Return `true` if cell is full (`α >= 1 - tol`).
+"""
 @inline is_full(vg::SplitVOFGrid, i::Int, j::Int) = vg.fract[i, j] >= 1.0 - vg.tol
+
+"""
+Return `true` if cell is mixed (`tol < α < 1 - tol`).
+"""
 @inline is_mixed(vg::SplitVOFGrid, i::Int, j::Int) = !is_empty(vg, i, j) && !is_full(vg, i, j)
 
 @inline is_empty(vg::SplitVOFGrid3D, i::Int, j::Int, k::Int) = vg.fract[i, j, k] <= vg.tol
 @inline is_full(vg::SplitVOFGrid3D, i::Int, j::Int, k::Int) = vg.fract[i, j, k] >= 1.0 - vg.tol
 @inline is_mixed(vg::SplitVOFGrid3D, i::Int, j::Int, k::Int) = !is_empty(vg, i, j, k) && !is_full(vg, i, j, k)
+
+function _reconstruct2d_verts()
+    tls = task_local_storage()
+    verts_any = get(tls, :_splitvof_reconstruct2d_verts, nothing)
+    if verts_any === nothing
+        verts = Matrix{Float64}(undef, 4, 2)
+        tls[:_splitvof_reconstruct2d_verts] = verts
+        return verts
+    end
+    return verts_any::Matrix{Float64}
+end
+
+function _reconstruct3d_verts()
+    tls = task_local_storage()
+    verts_any = get(tls, :_splitvof_reconstruct3d_verts, nothing)
+    if verts_any === nothing
+        verts = Matrix{Float64}(undef, 8, 3)
+        tls[:_splitvof_reconstruct3d_verts] = verts
+        return verts
+    end
+    return verts_any::Matrix{Float64}
+end
 
 function _youngs_gradient(vg::SplitVOFGrid, i::Int, j::Int)
     g = vg.grid
@@ -78,6 +111,9 @@ function _youngs_gradient(vg::SplitVOFGrid3D, i::Int, j::Int, k::Int)
     return dCdx, dCdy, dCdz
 end
 
+"""
+Compute Youngs interface normals in 2D and store in `nxint`, `nyint`.
+"""
 function youngs_normals!(vg::SplitVOFGrid)
     g = vg.grid
     C = vg.fract
@@ -113,6 +149,9 @@ function youngs_normals!(vg::SplitVOFGrid)
     return vg
 end
 
+"""
+Compute Youngs interface normals in 3D and store in `nxint`, `nyint`, `nzint`.
+"""
 function youngs_normals!(vg::SplitVOFGrid3D)
     g = vg.grid
     C = vg.fract
@@ -154,12 +193,15 @@ function youngs_normals!(vg::SplitVOFGrid3D)
     return vg
 end
 
+"""
+Reconstruct 2D PLIC planes (`cplic`) from the current volume fractions.
+"""
 function reconstruct!(vg::SplitVOFGrid)
     youngs_normals!(vg)
 
     g = vg.grid
     cell_area = g.dx * g.dy
-    verts = zeros(Float64, 4, 2)
+    verts = _reconstruct2d_verts()
 
     for j in 1:g.ny, i in 1:g.nx
         α = clamp(vg.fract[i, j], 0.0, 1.0)
@@ -186,12 +228,15 @@ function reconstruct!(vg::SplitVOFGrid)
     return vg
 end
 
+"""
+Reconstruct 3D PLIC planes (`cplic`) from the current volume fractions.
+"""
 function reconstruct!(vg::SplitVOFGrid3D)
     youngs_normals!(vg)
 
     g = vg.grid
     cell_vol = g.dx * g.dy * g.dz
-    verts = zeros(Float64, 8, 3)
+    verts = _reconstruct3d_verts()
 
     for k in 1:g.nz, j in 1:g.ny, i in 1:g.nx
         α = clamp(vg.fract[i, j, k], 0.0, 1.0)
@@ -223,6 +268,9 @@ function reconstruct!(vg::SplitVOFGrid3D)
     return vg
 end
 
+"""
+Dispatch reconstruction based on `params.reconstruction`.
+"""
 function reconstruct!(vg::AbstractSplitVOFGrid, params::SplitVOFParams)
     params.reconstruction isa YoungsPLIC ||
         throw(ArgumentError("Only YoungsPLIC() is currently implemented"))

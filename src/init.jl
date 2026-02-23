@@ -103,11 +103,36 @@ function _rect_polyhedron!(poly::Polyhedron3D,
     return poly
 end
 
+struct _Phi2DXY{F}
+    f::F
+end
+
+@inline (p::_Phi2DXY)(x::Float64, y::Float64) = Float64(p.f(x, y))
+
+struct _Phi2DSVec{F}
+    f::F
+end
+
+@inline (p::_Phi2DSVec)(x::Float64, y::Float64) = Float64(p.f(SVector{2,Float64}(x, y)))
+
+struct _Phi3DXYZ{F}
+    f::F
+end
+
+@inline (p::_Phi3DXYZ)(x::Float64, y::Float64, z::Float64) = Float64(p.f(x, y, z))
+
+struct _Phi3DSVec{F}
+    f::F
+end
+
+@inline (p::_Phi3DSVec)(x::Float64, y::Float64, z::Float64) =
+    Float64(p.f(SVector{3,Float64}(x, y, z)))
+
 function _as_phi2d(f::Function)
     if applicable(f, 0.0, 0.0)
-        return (x, y) -> Float64(f(x, y))
+        return _Phi2DXY(f)
     elseif applicable(f, SVector{2,Float64}(0.0, 0.0))
-        return (x, y) -> Float64(f(SVector{2,Float64}(x, y)))
+        return _Phi2DSVec(f)
     else
         throw(ArgumentError("level-set function must accept (x, y) or SVector{2}"))
     end
@@ -115,23 +140,65 @@ end
 
 function _as_phi3d(f::Function)
     if applicable(f, 0.0, 0.0, 0.0)
-        return (x, y, z) -> Float64(f(x, y, z))
+        return _Phi3DXYZ(f)
     elseif applicable(f, SVector{3,Float64}(0.0, 0.0, 0.0))
-        return (x, y, z) -> Float64(f(SVector{3,Float64}(x, y, z)))
+        return _Phi3DSVec(f)
     else
         throw(ArgumentError("level-set function must accept (x, y, z) or SVector{3}"))
     end
 end
 
-function initfgrid!(vg::SplitVOFGrid, f::Function; nc::Int=8, tol::Float64=10.0)
-    phi = _as_phi2d(f)
+function _get_init_poly2d(vg::SplitVOFGrid)
+    tls = task_local_storage()
+    cache_any = get(tls, :_splitvof_init_poly2d, nothing)
+    cache = if cache_any === nothing
+        c = Dict{UInt, Polygon2D}()
+        tls[:_splitvof_init_poly2d] = c
+        c
+    else
+        cache_any::Dict{UInt, Polygon2D}
+    end
+
+    key = objectid(vg)
+    poly = get(cache, key, nothing)
+    if poly === nothing
+        poly = _rect_polygon(0.0, 1.0, 0.0, 1.0)
+        cache[key] = poly
+    end
+    return poly
+end
+
+function _get_init_poly3d(vg::SplitVOFGrid3D)
+    tls = task_local_storage()
+    cache_any = get(tls, :_splitvof_init_poly3d, nothing)
+    cache = if cache_any === nothing
+        c = Dict{UInt, Polyhedron3D}()
+        tls[:_splitvof_init_poly3d] = c
+        c
+    else
+        cache_any::Dict{UInt, Polyhedron3D}
+    end
+
+    key = objectid(vg)
+    poly = get(cache, key, nothing)
+    if poly === nothing
+        poly = _rect_polyhedron(0.0, 1.0, 0.0, 1.0, 0.0, 1.0)
+        cache[key] = poly
+    end
+    return poly
+end
+
+function _initfgrid_phi!(vg::SplitVOFGrid, phi, nc::Int, tol::Float64)
     g = vg.grid
-    poly = _rect_polygon(0.0, 1.0, 0.0, 1.0)
+    poly = _get_init_poly2d(vg)
 
     for j in 1:g.ny, i in 1:g.nx
-        xL, xR, yB, yT = cell_bounds(g, i, j)
+        xL = g.xlo + (i - 1) * g.dx
+        xR = xL + g.dx
+        yB = g.ylo + (j - 1) * g.dy
+        yT = yB + g.dy
         _rect_polygon!(poly, xL, xR, yB, yT)
-        α = initf2d(phi, poly; nc=nc, tol=tol)
+        α = initf2d(phi, poly, nc, tol)
         vg.fract[i, j] = clamp(α, 0.0, 1.0)
     end
 
@@ -140,15 +207,19 @@ function initfgrid!(vg::SplitVOFGrid, f::Function; nc::Int=8, tol::Float64=10.0)
     return vg
 end
 
-function initfgrid!(vg::SplitVOFGrid3D, f::Function; nc::Int=6, tol::Float64=10.0)
-    phi = _as_phi3d(f)
+function _initfgrid_phi!(vg::SplitVOFGrid3D, phi, nc::Int, tol::Float64)
     g = vg.grid
-    poly = _rect_polyhedron(0.0, 1.0, 0.0, 1.0, 0.0, 1.0)
+    poly = _get_init_poly3d(vg)
 
     for k in 1:g.nz, j in 1:g.ny, i in 1:g.nx
-        xL, xR, yB, yT, zD, zU = cell_bounds(g, i, j, k)
+        xL = g.xlo + (i - 1) * g.dx
+        xR = xL + g.dx
+        yB = g.ylo + (j - 1) * g.dy
+        yT = yB + g.dy
+        zD = g.zlo + (k - 1) * g.dz
+        zU = zD + g.dz
         _rect_polyhedron!(poly, xL, xR, yB, yT, zD, zU)
-        α = initf3d(phi, poly; nc=nc, tol=tol)
+        α = initf3d(phi, poly, nc, tol)
         vg.fract[i, j, k] = clamp(α, 0.0, 1.0)
     end
 
@@ -157,18 +228,49 @@ function initfgrid!(vg::SplitVOFGrid3D, f::Function; nc::Int=6, tol::Float64=10.
     return vg
 end
 
+"""
+Initialize 2D volume fractions from an implicit level-set function.
+
+`f` can accept either `(x, y)` or `SVector{2}` and is interpreted as:
+- `f > 0`: inside liquid
+- `f < 0`: outside liquid
+"""
+function initfgrid!(vg::SplitVOFGrid, f::Function; nc::Int=8, tol::Float64=10.0)
+    return _initfgrid_phi!(vg, _as_phi2d(f), nc, tol)
+end
+
+"""
+Initialize 3D volume fractions from an implicit level-set function.
+
+`f` can accept either `(x, y, z)` or `SVector{3}` and is interpreted as:
+- `f > 0`: inside liquid
+- `f < 0`: outside liquid
+"""
+function initfgrid!(vg::SplitVOFGrid3D, f::Function; nc::Int=6, tol::Float64=10.0)
+    return _initfgrid_phi!(vg, _as_phi3d(f), nc, tol)
+end
+
+"""
+Build a circular implicit function for 2D initialization.
+"""
 function circle_levelset(center::NTuple{2,<:Real}=(0.5, 0.5), radius::Real=0.25)
     cx, cy = Float64(center[1]), Float64(center[2])
     r2 = Float64(radius)^2
     return (x, y) -> r2 - ((x - cx)^2 + (y - cy)^2)
 end
 
+"""
+Build a spherical implicit function for 3D initialization.
+"""
 function sphere_levelset(center::NTuple{3,<:Real}=(0.5, 0.5, 0.5), radius::Real=0.25)
     cx, cy, cz = Float64(center[1]), Float64(center[2]), Float64(center[3])
     r2 = Float64(radius)^2
     return (x, y, z) -> r2 - ((x - cx)^2 + (y - cy)^2 + (z - cz)^2)
 end
 
+"""
+Build the standard Zalesak slotted-disk implicit function.
+"""
 function zalesak_levelset(; center=(0.5, 0.5),
                            radius=0.3,
                            slot_width=0.1,

@@ -2,6 +2,7 @@ using Test
 using SplitVOF
 using StaticArrays
 using VOFTools
+using LinearAlgebra
 
 include("test_init.jl")
 include("test_reconstruction.jl")

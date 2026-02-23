@@ -9,9 +9,9 @@ StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 VOFTools = "f4b4545c-59ad-49ee-afe8-a74df8bf51d2"
 
 [compat]
-julia = "1.10"
 StaticArrays = "1"
 VOFTools = "0.2"
+julia = "1.10"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"

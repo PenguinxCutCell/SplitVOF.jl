@@ -6,6 +6,7 @@
 
     alpha0 = copy(vg.fract)
     v0 = volume(vg)
+    s0 = shape_metrics(vg)
 
     u = (x, t) -> SVector(0.5, 0.0)
     tf = 4.0  # one full periodic lap in x over domain length 2.0
@@ -17,4 +18,9 @@
 
     rel_shape_err = l1_error(vg, alpha0) / (π * R^2)
     @test rel_shape_err < 0.08
+
+    # Shape checks beyond mass conservation.
+    s1 = shape_metrics(vg)
+    @test norm(s1.centroid - s0.centroid) < 2.0e-2
+    @test norm(s1.second_moments - s0.second_moments) / norm(s0.second_moments) < 6.0e-2
 end

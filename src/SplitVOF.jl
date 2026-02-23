@@ -41,6 +41,9 @@ export SplitVOFParams,
     step!,
     vofadv!,
     integrate!,
-    l1_error
+    l1_error,
+    l2_error,
+    linf_error,
+    shape_metrics
 
 end # module SplitVOF

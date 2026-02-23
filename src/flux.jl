@@ -47,6 +47,74 @@ function _velocity_at(v::Function, x::SVector{3,Float64}, t::Float64)
     end
 end
 
+@inline function _velocity_mode_2d(v::F, t::Float64) where {F<:Function}
+    tls = task_local_storage()
+    cache_any = get(tls, :_splitvof_velocity_mode_2d, nothing)
+    cache = if cache_any === nothing
+        c = Dict{DataType,Int}()
+        tls[:_splitvof_velocity_mode_2d] = c
+        c
+    else
+        cache_any::Dict{DataType,Int}
+    end
+
+    T = typeof(v)
+    mode = get(cache, T, 0)
+    if mode != 0
+        return mode
+    end
+
+    x = SVector{2,Float64}(0.0, 0.0)
+    if applicable(v, x, t)
+        mode = 1
+    elseif applicable(v, x[1], x[2], t)
+        mode = 2
+    elseif applicable(v, x)
+        mode = 3
+    elseif applicable(v, x[1], x[2])
+        mode = 4
+    else
+        throw(ArgumentError("velocity must accept (x,t), (x,y,t), (x), or (x,y) for 2D"))
+    end
+
+    cache[T] = mode
+    return mode
+end
+
+@inline function _velocity_mode_3d(v::F, t::Float64) where {F<:Function}
+    tls = task_local_storage()
+    cache_any = get(tls, :_splitvof_velocity_mode_3d, nothing)
+    cache = if cache_any === nothing
+        c = Dict{DataType,Int}()
+        tls[:_splitvof_velocity_mode_3d] = c
+        c
+    else
+        cache_any::Dict{DataType,Int}
+    end
+
+    T = typeof(v)
+    mode = get(cache, T, 0)
+    if mode != 0
+        return mode
+    end
+
+    x = SVector{3,Float64}(0.0, 0.0, 0.0)
+    if applicable(v, x, t)
+        mode = 1
+    elseif applicable(v, x[1], x[2], x[3], t)
+        mode = 2
+    elseif applicable(v, x)
+        mode = 3
+    elseif applicable(v, x[1], x[2], x[3])
+        mode = 4
+    else
+        throw(ArgumentError("velocity must accept (x,t), (x,y,z,t), (x), or (x,y,z) for 3D"))
+    end
+
+    cache[T] = mode
+    return mode
+end
+
 mutable struct _Sweep2DWork
     uface::Matrix{Float64}
     vface::Matrix{Float64}
@@ -134,6 +202,46 @@ function _get_sweep3d_work(vg::SplitVOFGrid3D)
 end
 
 function _x_face_velocities!(uface::AbstractArray{Float64,2},
+                             vg::SplitVOFGrid, velocity::F, t::Float64) where {F<:Function}
+    g = vg.grid
+    mode = _velocity_mode_2d(velocity, t)
+    if mode == 1
+        @inbounds for j in 1:g.ny
+            y = g.ylo + (j - 0.5) * g.dy
+            for iface in 1:(g.nx + 1)
+                x = g.xlo + (iface - 1) * g.dx
+                uface[iface, j] = Float64(velocity(SVector{2,Float64}(x, y), t)[1])
+            end
+        end
+    elseif mode == 2
+        @inbounds for j in 1:g.ny
+            y = g.ylo + (j - 0.5) * g.dy
+            for iface in 1:(g.nx + 1)
+                x = g.xlo + (iface - 1) * g.dx
+                uface[iface, j] = Float64(velocity(x, y, t)[1])
+            end
+        end
+    elseif mode == 3
+        @inbounds for j in 1:g.ny
+            y = g.ylo + (j - 0.5) * g.dy
+            for iface in 1:(g.nx + 1)
+                x = g.xlo + (iface - 1) * g.dx
+                uface[iface, j] = Float64(velocity(SVector{2,Float64}(x, y))[1])
+            end
+        end
+    else
+        @inbounds for j in 1:g.ny
+            y = g.ylo + (j - 0.5) * g.dy
+            for iface in 1:(g.nx + 1)
+                x = g.xlo + (iface - 1) * g.dx
+                uface[iface, j] = Float64(velocity(x, y)[1])
+            end
+        end
+    end
+    return uface
+end
+
+function _x_face_velocities!(uface::AbstractArray{Float64,2},
                              vg::SplitVOFGrid, velocity, t::Float64)
     g = vg.grid
     @inbounds for j in 1:g.ny
@@ -148,6 +256,46 @@ function _x_face_velocities!(uface::AbstractArray{Float64,2},
 end
 
 function _y_face_velocities!(vface::AbstractArray{Float64,2},
+                             vg::SplitVOFGrid, velocity::F, t::Float64) where {F<:Function}
+    g = vg.grid
+    mode = _velocity_mode_2d(velocity, t)
+    if mode == 1
+        @inbounds for jface in 1:(g.ny + 1)
+            y = g.ylo + (jface - 1) * g.dy
+            for i in 1:g.nx
+                x = g.xlo + (i - 0.5) * g.dx
+                vface[i, jface] = Float64(velocity(SVector{2,Float64}(x, y), t)[2])
+            end
+        end
+    elseif mode == 2
+        @inbounds for jface in 1:(g.ny + 1)
+            y = g.ylo + (jface - 1) * g.dy
+            for i in 1:g.nx
+                x = g.xlo + (i - 0.5) * g.dx
+                vface[i, jface] = Float64(velocity(x, y, t)[2])
+            end
+        end
+    elseif mode == 3
+        @inbounds for jface in 1:(g.ny + 1)
+            y = g.ylo + (jface - 1) * g.dy
+            for i in 1:g.nx
+                x = g.xlo + (i - 0.5) * g.dx
+                vface[i, jface] = Float64(velocity(SVector{2,Float64}(x, y))[2])
+            end
+        end
+    else
+        @inbounds for jface in 1:(g.ny + 1)
+            y = g.ylo + (jface - 1) * g.dy
+            for i in 1:g.nx
+                x = g.xlo + (i - 0.5) * g.dx
+                vface[i, jface] = Float64(velocity(x, y)[2])
+            end
+        end
+    end
+    return vface
+end
+
+function _y_face_velocities!(vface::AbstractArray{Float64,2},
                              vg::SplitVOFGrid, velocity, t::Float64)
     g = vg.grid
     @inbounds for jface in 1:(g.ny + 1)
@@ -159,6 +307,50 @@ function _y_face_velocities!(vface::AbstractArray{Float64,2},
         end
     end
     return vface
+end
+
+function _x_face_velocities!(uface::AbstractArray{Float64,3},
+                             vg::SplitVOFGrid3D, velocity::F, t::Float64) where {F<:Function}
+    g = vg.grid
+    mode = _velocity_mode_3d(velocity, t)
+    if mode == 1
+        @inbounds for k in 1:g.nz, j in 1:g.ny
+            y = g.ylo + (j - 0.5) * g.dy
+            z = g.zlo + (k - 0.5) * g.dz
+            for iface in 1:(g.nx + 1)
+                x = g.xlo + (iface - 1) * g.dx
+                uface[iface, j, k] = Float64(velocity(SVector{3,Float64}(x, y, z), t)[1])
+            end
+        end
+    elseif mode == 2
+        @inbounds for k in 1:g.nz, j in 1:g.ny
+            y = g.ylo + (j - 0.5) * g.dy
+            z = g.zlo + (k - 0.5) * g.dz
+            for iface in 1:(g.nx + 1)
+                x = g.xlo + (iface - 1) * g.dx
+                uface[iface, j, k] = Float64(velocity(x, y, z, t)[1])
+            end
+        end
+    elseif mode == 3
+        @inbounds for k in 1:g.nz, j in 1:g.ny
+            y = g.ylo + (j - 0.5) * g.dy
+            z = g.zlo + (k - 0.5) * g.dz
+            for iface in 1:(g.nx + 1)
+                x = g.xlo + (iface - 1) * g.dx
+                uface[iface, j, k] = Float64(velocity(SVector{3,Float64}(x, y, z))[1])
+            end
+        end
+    else
+        @inbounds for k in 1:g.nz, j in 1:g.ny
+            y = g.ylo + (j - 0.5) * g.dy
+            z = g.zlo + (k - 0.5) * g.dz
+            for iface in 1:(g.nx + 1)
+                x = g.xlo + (iface - 1) * g.dx
+                uface[iface, j, k] = Float64(velocity(x, y, z)[1])
+            end
+        end
+    end
+    return uface
 end
 
 function _x_face_velocities!(uface::AbstractArray{Float64,3},
@@ -177,6 +369,50 @@ function _x_face_velocities!(uface::AbstractArray{Float64,3},
 end
 
 function _y_face_velocities!(vface::AbstractArray{Float64,3},
+                             vg::SplitVOFGrid3D, velocity::F, t::Float64) where {F<:Function}
+    g = vg.grid
+    mode = _velocity_mode_3d(velocity, t)
+    if mode == 1
+        @inbounds for k in 1:g.nz, jface in 1:(g.ny + 1)
+            y = g.ylo + (jface - 1) * g.dy
+            z = g.zlo + (k - 0.5) * g.dz
+            for i in 1:g.nx
+                x = g.xlo + (i - 0.5) * g.dx
+                vface[i, jface, k] = Float64(velocity(SVector{3,Float64}(x, y, z), t)[2])
+            end
+        end
+    elseif mode == 2
+        @inbounds for k in 1:g.nz, jface in 1:(g.ny + 1)
+            y = g.ylo + (jface - 1) * g.dy
+            z = g.zlo + (k - 0.5) * g.dz
+            for i in 1:g.nx
+                x = g.xlo + (i - 0.5) * g.dx
+                vface[i, jface, k] = Float64(velocity(x, y, z, t)[2])
+            end
+        end
+    elseif mode == 3
+        @inbounds for k in 1:g.nz, jface in 1:(g.ny + 1)
+            y = g.ylo + (jface - 1) * g.dy
+            z = g.zlo + (k - 0.5) * g.dz
+            for i in 1:g.nx
+                x = g.xlo + (i - 0.5) * g.dx
+                vface[i, jface, k] = Float64(velocity(SVector{3,Float64}(x, y, z))[2])
+            end
+        end
+    else
+        @inbounds for k in 1:g.nz, jface in 1:(g.ny + 1)
+            y = g.ylo + (jface - 1) * g.dy
+            z = g.zlo + (k - 0.5) * g.dz
+            for i in 1:g.nx
+                x = g.xlo + (i - 0.5) * g.dx
+                vface[i, jface, k] = Float64(velocity(x, y, z)[2])
+            end
+        end
+    end
+    return vface
+end
+
+function _y_face_velocities!(vface::AbstractArray{Float64,3},
                              vg::SplitVOFGrid3D, velocity, t::Float64)
     g = vg.grid
     @inbounds for k in 1:g.nz, jface in 1:(g.ny + 1)
@@ -189,6 +425,42 @@ function _y_face_velocities!(vface::AbstractArray{Float64,3},
         end
     end
     return vface
+end
+
+function _z_face_velocities!(wface::AbstractArray{Float64,3},
+                             vg::SplitVOFGrid3D, velocity::F, t::Float64) where {F<:Function}
+    g = vg.grid
+    mode = _velocity_mode_3d(velocity, t)
+    if mode == 1
+        @inbounds for kface in 1:(g.nz + 1), j in 1:g.ny, i in 1:g.nx
+            z = g.zlo + (kface - 1) * g.dz
+            x = g.xlo + (i - 0.5) * g.dx
+            y = g.ylo + (j - 0.5) * g.dy
+            wface[i, j, kface] = Float64(velocity(SVector{3,Float64}(x, y, z), t)[3])
+        end
+    elseif mode == 2
+        @inbounds for kface in 1:(g.nz + 1), j in 1:g.ny, i in 1:g.nx
+            z = g.zlo + (kface - 1) * g.dz
+            x = g.xlo + (i - 0.5) * g.dx
+            y = g.ylo + (j - 0.5) * g.dy
+            wface[i, j, kface] = Float64(velocity(x, y, z, t)[3])
+        end
+    elseif mode == 3
+        @inbounds for kface in 1:(g.nz + 1), j in 1:g.ny, i in 1:g.nx
+            z = g.zlo + (kface - 1) * g.dz
+            x = g.xlo + (i - 0.5) * g.dx
+            y = g.ylo + (j - 0.5) * g.dy
+            wface[i, j, kface] = Float64(velocity(SVector{3,Float64}(x, y, z))[3])
+        end
+    else
+        @inbounds for kface in 1:(g.nz + 1), j in 1:g.ny, i in 1:g.nx
+            z = g.zlo + (kface - 1) * g.dz
+            x = g.xlo + (i - 0.5) * g.dx
+            y = g.ylo + (j - 0.5) * g.dy
+            wface[i, j, kface] = Float64(velocity(x, y, z)[3])
+        end
+    end
+    return wface
 end
 
 function _z_face_velocities!(wface::AbstractArray{Float64,3},

@@ -1,9 +1,33 @@
+"""
+Abstract supertype for interface-reconstruction algorithms.
+"""
 abstract type ReconstructionMethod end
+
+"""
+Youngs gradient-based normal reconstruction with PLIC volume enforcement.
+"""
 struct YoungsPLIC <: ReconstructionMethod end
 
+"""
+Abstract supertype for advection/integration algorithms.
+"""
 abstract type AdvectionMethod end
+
+"""
+Directional Strang splitting advection scheme.
+"""
 struct StrangSplit <: AdvectionMethod end
 
+"""
+Simulation parameters for split geometric VOF on a Cartesian grid.
+
+Key fields:
+- `nx, ny, nz`: number of cells
+- `xlim, ylim, zlim`: domain bounds
+- `cfl`: target CFL for `compute_dt`/`integrate!`
+- `tol`: interface tolerance for empty/full detection
+- `reconstruction`, `advection`: algorithm selectors
+"""
 Base.@kwdef struct SplitVOFParams
     nx::Int = 64
     ny::Int = 64
@@ -17,6 +41,9 @@ Base.@kwdef struct SplitVOFParams
     advection::AdvectionMethod = StrangSplit()
 end
 
+"""
+Uniform 2D Cartesian grid descriptor.
+"""
 struct CartesianGrid2D{T<:AbstractFloat}
     xlo::T
     xhi::T
@@ -28,6 +55,9 @@ struct CartesianGrid2D{T<:AbstractFloat}
     dy::T
 end
 
+"""
+Build a 2D Cartesian grid from domain limits and cell counts.
+"""
 function CartesianGrid2D(xlim::NTuple{2,<:Real},
                          ylim::NTuple{2,<:Real},
                          n::NTuple{2,Int})
@@ -45,6 +75,9 @@ function CartesianGrid2D(xlim::NTuple{2,<:Real},
     return CartesianGrid2D(xlo, xhi, ylo, yhi, nx, ny, dx, dy)
 end
 
+"""
+Uniform 3D Cartesian grid descriptor.
+"""
 struct CartesianGrid3D{T<:AbstractFloat}
     xlo::T
     xhi::T
@@ -60,6 +93,9 @@ struct CartesianGrid3D{T<:AbstractFloat}
     dz::T
 end
 
+"""
+Build a 3D Cartesian grid from domain limits and cell counts.
+"""
 function CartesianGrid3D(xlim::NTuple{2,<:Real},
                          ylim::NTuple{2,<:Real},
                          zlim::NTuple{2,<:Real},
@@ -83,6 +119,9 @@ function CartesianGrid3D(xlim::NTuple{2,<:Real},
     return CartesianGrid3D(xlo, xhi, ylo, yhi, zlo, zhi, nx, ny, nz, dx, dy, dz)
 end
 
+"""
+2D split-VOF state container.
+"""
 mutable struct SplitVOFGrid{T<:AbstractFloat}
     grid::CartesianGrid2D{T}
     fract::Matrix{T}
@@ -94,6 +133,9 @@ mutable struct SplitVOFGrid{T<:AbstractFloat}
     tol::T
 end
 
+"""
+3D split-VOF state container.
+"""
 mutable struct SplitVOFGrid3D{T<:AbstractFloat}
     grid::CartesianGrid3D{T}
     fract::Array{T,3}
@@ -108,9 +150,17 @@ end
 
 const AbstractSplitVOFGrid = Union{SplitVOFGrid, SplitVOFGrid3D}
 
+"""
+Return spatial dimension (`2` or `3`) of a split-VOF state.
+"""
 dimension(::SplitVOFGrid) = 2
 dimension(::SplitVOFGrid3D) = 3
 
+"""
+Allocate and initialize a split-VOF state from `SplitVOFParams`.
+
+Returns `SplitVOFGrid` when `nz <= 1`, otherwise `SplitVOFGrid3D`.
+"""
 function splitgrid(params::SplitVOFParams=SplitVOFParams())
     if params.nz <= 1
         grid = CartesianGrid2D(params.xlim, params.ylim, (params.nx, params.ny))
@@ -131,6 +181,9 @@ function splitgrid(params::SplitVOFParams=SplitVOFParams())
     end
 end
 
+"""
+Allocate a 2D split-VOF state from an existing Cartesian grid.
+"""
 function splitgrid(grid::CartesianGrid2D; tol::Real=1.0e-12)
     fract = zeros(Float64, grid.nx, grid.ny)
     nxint = zeros(Float64, grid.nx, grid.ny)
@@ -139,6 +192,9 @@ function splitgrid(grid::CartesianGrid2D; tol::Real=1.0e-12)
     return SplitVOFGrid(grid, fract, nxint, nyint, cplic, 0.0, 0, Float64(tol))
 end
 
+"""
+Allocate a 3D split-VOF state from an existing Cartesian grid.
+"""
 function splitgrid(grid::CartesianGrid3D; tol::Real=1.0e-12)
     fract = zeros(Float64, grid.nx, grid.ny, grid.nz)
     nxint = zeros(Float64, grid.nx, grid.ny, grid.nz)
@@ -148,7 +204,14 @@ function splitgrid(grid::CartesianGrid3D; tol::Real=1.0e-12)
     return SplitVOFGrid3D(grid, fract, nxint, nyint, nzint, cplic, 0.0, 0, Float64(tol))
 end
 
+"""
+Alias for `splitgrid(params)`.
+"""
 vofgrid(params::SplitVOFParams=SplitVOFParams()) = splitgrid(params)
+
+"""
+Return the volume-fraction array stored in the split-VOF state.
+"""
 fractg(vg::AbstractSplitVOFGrid) = vg.fract
 
 Base.size(vg::SplitVOFGrid) = size(vg.fract)
@@ -167,9 +230,15 @@ function Base.setindex!(vg::SplitVOFGrid3D, v, i::Int, j::Int, k::Int)
     return vg
 end
 
+"""
+Total material volume (area in 2D) represented by the volume-fraction field.
+"""
 volume(vg::SplitVOFGrid) = sum(vg.fract) * vg.grid.dx * vg.grid.dy
 volume(vg::SplitVOFGrid3D) = sum(vg.fract) * vg.grid.dx * vg.grid.dy * vg.grid.dz
 
+"""
+L1 error of the volume-fraction field against a reference field.
+"""
 function l1_error(vg::SplitVOFGrid, ref::AbstractMatrix{<:Real})
     size(ref) == size(vg.fract) || throw(ArgumentError("reference has wrong size"))
     return sum(abs.(vg.fract .- ref)) * vg.grid.dx * vg.grid.dy
@@ -178,4 +247,152 @@ end
 function l1_error(vg::SplitVOFGrid3D, ref::AbstractArray{<:Real,3})
     size(ref) == size(vg.fract) || throw(ArgumentError("reference has wrong size"))
     return sum(abs.(vg.fract .- ref)) * vg.grid.dx * vg.grid.dy * vg.grid.dz
+end
+
+"""
+L2 error of the volume-fraction field against a reference field.
+"""
+function l2_error(vg::SplitVOFGrid, ref::AbstractMatrix{<:Real})
+    size(ref) == size(vg.fract) || throw(ArgumentError("reference has wrong size"))
+    s = 0.0
+    @inbounds for j in 1:vg.grid.ny, i in 1:vg.grid.nx
+        d = vg.fract[i, j] - ref[i, j]
+        s += d * d
+    end
+    return sqrt(s * vg.grid.dx * vg.grid.dy)
+end
+
+function l2_error(vg::SplitVOFGrid3D, ref::AbstractArray{<:Real,3})
+    size(ref) == size(vg.fract) || throw(ArgumentError("reference has wrong size"))
+    s = 0.0
+    @inbounds for k in 1:vg.grid.nz, j in 1:vg.grid.ny, i in 1:vg.grid.nx
+        d = vg.fract[i, j, k] - ref[i, j, k]
+        s += d * d
+    end
+    return sqrt(s * vg.grid.dx * vg.grid.dy * vg.grid.dz)
+end
+
+"""
+L∞ error of the volume-fraction field against a reference field.
+"""
+function linf_error(vg::SplitVOFGrid, ref::AbstractMatrix{<:Real})
+    size(ref) == size(vg.fract) || throw(ArgumentError("reference has wrong size"))
+    e = 0.0
+    @inbounds for j in 1:vg.grid.ny, i in 1:vg.grid.nx
+        e = max(e, abs(vg.fract[i, j] - ref[i, j]))
+    end
+    return e
+end
+
+function linf_error(vg::SplitVOFGrid3D, ref::AbstractArray{<:Real,3})
+    size(ref) == size(vg.fract) || throw(ArgumentError("reference has wrong size"))
+    e = 0.0
+    @inbounds for k in 1:vg.grid.nz, j in 1:vg.grid.ny, i in 1:vg.grid.nx
+        e = max(e, abs(vg.fract[i, j, k] - ref[i, j, k]))
+    end
+    return e
+end
+
+"""
+Compute bulk shape descriptors from the volume-fraction field.
+
+Returns a named tuple:
+- `volume`
+- `centroid`
+- `second_moments` (central second-moment tensor)
+"""
+function shape_metrics(vg::SplitVOFGrid)
+    g = vg.grid
+    dA = g.dx * g.dy
+    vol = 0.0
+    sx = 0.0
+    sy = 0.0
+    @inbounds for j in 1:g.ny, i in 1:g.nx
+        α = vg.fract[i, j]
+        x = g.xlo + (i - 0.5) * g.dx
+        y = g.ylo + (j - 0.5) * g.dy
+        w = α * dA
+        vol += w
+        sx += w * x
+        sy += w * y
+    end
+
+    if vol <= eps(Float64)
+        return (volume=0.0,
+                centroid=SVector{2,Float64}(0.0, 0.0),
+                second_moments=SMatrix{2,2,Float64,4}(0.0, 0.0, 0.0, 0.0))
+    end
+
+    cx = sx / vol
+    cy = sy / vol
+    mxx = 0.0
+    mxy = 0.0
+    myy = 0.0
+    @inbounds for j in 1:g.ny, i in 1:g.nx
+        α = vg.fract[i, j]
+        x = g.xlo + (i - 0.5) * g.dx
+        y = g.ylo + (j - 0.5) * g.dy
+        dx = x - cx
+        dy = y - cy
+        w = α * dA
+        mxx += w * dx * dx
+        mxy += w * dx * dy
+        myy += w * dy * dy
+    end
+
+    M2 = SMatrix{2,2,Float64,4}(mxx, mxy, mxy, myy)
+    return (volume=vol, centroid=SVector{2,Float64}(cx, cy), second_moments=M2)
+end
+
+function shape_metrics(vg::SplitVOFGrid3D)
+    g = vg.grid
+    dV = g.dx * g.dy * g.dz
+    vol = 0.0
+    sx = 0.0
+    sy = 0.0
+    sz = 0.0
+    @inbounds for k in 1:g.nz, j in 1:g.ny, i in 1:g.nx
+        α = vg.fract[i, j, k]
+        x = g.xlo + (i - 0.5) * g.dx
+        y = g.ylo + (j - 0.5) * g.dy
+        z = g.zlo + (k - 0.5) * g.dz
+        w = α * dV
+        vol += w
+        sx += w * x
+        sy += w * y
+        sz += w * z
+    end
+
+    if vol <= eps(Float64)
+        return (volume=0.0,
+                centroid=SVector{3,Float64}(0.0, 0.0, 0.0),
+                second_moments=SMatrix{3,3,Float64,9}(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0))
+    end
+
+    cx = sx / vol
+    cy = sy / vol
+    cz = sz / vol
+    mxx = 0.0; mxy = 0.0; mxz = 0.0
+    myy = 0.0; myz = 0.0; mzz = 0.0
+    @inbounds for k in 1:g.nz, j in 1:g.ny, i in 1:g.nx
+        α = vg.fract[i, j, k]
+        x = g.xlo + (i - 0.5) * g.dx
+        y = g.ylo + (j - 0.5) * g.dy
+        z = g.zlo + (k - 0.5) * g.dz
+        dx = x - cx
+        dy = y - cy
+        dz = z - cz
+        w = α * dV
+        mxx += w * dx * dx
+        mxy += w * dx * dy
+        mxz += w * dx * dz
+        myy += w * dy * dy
+        myz += w * dy * dz
+        mzz += w * dz * dz
+    end
+
+    M2 = SMatrix{3,3,Float64,9}(mxx, mxy, mxz,
+                                mxy, myy, myz,
+                                mxz, myz, mzz)
+    return (volume=vol, centroid=SVector{3,Float64}(cx, cy, cz), second_moments=M2)
 end
