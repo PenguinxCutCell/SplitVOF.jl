@@ -1,5 +1,9 @@
 # SplitVOF.jl
 
+[![In development documentation](https://img.shields.io/badge/docs-dev-blue.svg)](https://penguinxcutcell.github.io/SplitVOF.jl/dev)
+![CI](https://github.com/PenguinxCutCell/SplitVOF.jl/workflows/CI/badge.svg)
+
+
 A geometric split-advection VOF (PLIC) implementation on periodic Cartesian grids.
 
 ## Implemented baseline
