@@ -24,3 +24,27 @@
     @test norm(s1.centroid - s0.centroid) < 2.0e-2
     @test norm(s1.second_moments - s0.second_moments) / norm(s0.second_moments) < 6.0e-2
 end
+
+@testset "Split advection: SLIC translation" begin
+    params = SplitVOFParams(
+        nx=48,
+        ny=48,
+        xlim=(-1.0, 1.0),
+        ylim=(-1.0, 1.0),
+        cfl=0.5,
+        reconstruction=SLIC(),
+    )
+    vg = splitgrid(params)
+    R = 0.30
+    initfgrid!(vg, circle_levelset((0.0, 0.0), R); nc=8)
+
+    alpha0 = copy(vg.fract)
+    v0 = volume(vg)
+    u = (x, t) -> SVector(0.5, 0.0)
+
+    integrate!(vg, u, 4.0, params)
+
+    @test abs(volume(vg) - v0) / v0 < 1e-12
+    @test all((-1e-12 .<= vg.fract) .& (vg.fract .<= 1 + 1e-12))
+    @test l1_error(vg, alpha0) / (π * R^2) < 0.20
+end

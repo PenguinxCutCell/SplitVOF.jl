@@ -4,9 +4,55 @@ Abstract supertype for interface-reconstruction algorithms.
 abstract type ReconstructionMethod end
 
 """
+Abstract supertype for normal-vector reconstruction algorithms.
+"""
+abstract type NormalMethod end
+
+"""
+Youngs volume-fraction gradient normal.
+"""
+struct YoungsNormal <: NormalMethod end
+
+"""
+Height-function normal. Currently implemented for 2D split grids.
+"""
+struct HeightFunctionNormal <: NormalMethod end
+
+"""
+ELVIRA-style normal selected by local volume-fraction stencil scoring.
+Currently implemented for 2D split grids.
+"""
+struct ELVIRANormal <: NormalMethod end
+
+"""
+Abstract supertype for interface representations.
+"""
+abstract type InterfaceMethod <: ReconstructionMethod end
+
+"""
+Piecewise-linear interface representation.
+"""
+struct PLIC <: InterfaceMethod end
+
+"""
 Youngs gradient-based normal reconstruction with PLIC volume enforcement.
 """
 struct YoungsPLIC <: ReconstructionMethod end
+
+"""
+Youngs gradient direction reduced to an axis-aligned SLIC interface.
+"""
+struct SLIC <: InterfaceMethod end
+
+"""
+Composable reconstruction selector.
+"""
+struct Reconstruction{N <: NormalMethod, I <: InterfaceMethod} <: ReconstructionMethod
+    normal::N
+    interface::I
+end
+
+Reconstruction(; normal=YoungsNormal(), interface=PLIC()) = Reconstruction(normal, interface)
 
 """
 Abstract supertype for advection/integration algorithms.
@@ -17,6 +63,11 @@ abstract type AdvectionMethod end
 Directional Strang splitting advection scheme.
 """
 struct StrangSplit <: AdvectionMethod end
+
+"""
+First-order Lie directional splitting advection scheme.
+"""
+struct LieSplit <: AdvectionMethod end
 
 """
 Simulation parameters for split geometric VOF on a Cartesian grid.
